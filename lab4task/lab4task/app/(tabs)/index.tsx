@@ -1,91 +1,91 @@
-import { View, Text, Button, StyleSheet } from "react-native";
-import { useState } from "react";
-import * as Location from "expo-location";
-import * as TaskManager from "expo-task-manager";
+import React, { useEffect, useState } from 'react';
+import { Button, View, StyleSheet, Text } from 'react-native';
+import * as TaskManager from 'expo-task-manager';
+import * as Location from 'expo-location';
 
-const TASK_NAME = "location-background-task";
+const LOCATION_TASK_NAME = 'background-location-task';
 
-// store latest coordinates
-let currentCoords: { latitude: number; longitude: number } | null = null;
-
-// Background task
-TaskManager.defineTask(TASK_NAME, (task: TaskManager.TaskManagerTaskBody) => {
-
-  const { data, error } = task;
-
+// Define the background task at the top level (outside the component)
+TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
   if (error) {
-    console.log("Location task error:", error);
+    console.error('Background location task error:', error.message);
     return;
   }
-
   if (data) {
     const { locations } = data as { locations: Location.LocationObject[] };
-
-    const latitude = locations[0].coords.latitude;
-    const longitude = locations[0].coords.longitude;
-
-    currentCoords = { latitude, longitude };
+    console.log('Background location update:', locations);
   }
-
 });
-export default function Index() {
-  const [location, setLocation] = useState<{
-    latitude: number;
-    longitude: number;
-  } | null>(null);
 
-  const startTracking = async () => {
-    // Request foreground permission
-    const { status } = await Location.requestForegroundPermissionsAsync();
+export default function App() {
+  const [location, setLocation] = useState<Location.LocationObject | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isTracking, setIsTracking] = useState(false);
 
-    if (status !== "granted") {
-      alert("Location permission denied");
-      return;
-    }
-
-    // Request background permission
-    const background = await Location.requestBackgroundPermissionsAsync();
-
-    if (background.status !== "granted") {
-      alert("Background location permission denied");
-      return;
-    }
-
-    // Get current location immediately
-    const position = await Location.getCurrentPositionAsync({});
-    setLocation({
-      latitude: position.coords.latitude,
-      longitude: position.coords.longitude,
-    });
-
-    // Start background updates
-    await Location.startLocationUpdatesAsync(TASK_NAME, {
-      accuracy: Location.Accuracy.High,
-      timeInterval: 5000,
-      distanceInterval: 1,
-    });
-  };
-
-  const refreshLocation = () => {
-    if (currentCoords) {
-      setLocation(currentCoords);
+  const requestPermissions = async () => {
+    const { status: foregroundStatus } =
+      await Location.requestForegroundPermissionsAsync();
+    if (foregroundStatus === 'granted') {
+      const { status: backgroundStatus } =
+        await Location.requestBackgroundPermissionsAsync();
+      if (backgroundStatus === 'granted') {
+        await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+          accuracy: Location.Accuracy.Balanced,
+        });
+        setIsTracking(true);
+      } else {
+        setErrorMsg('Background location permission not granted');
+      }
+    } else {
+      setErrorMsg('Foreground location permission not granted');
     }
   };
+
+  // Also get foreground location to display latitude/longitude
+  useEffect(() => {
+    (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setErrorMsg('Permission to access location was denied');
+        return;
+      }
+
+      const currentLocation = await Location.getCurrentPositionAsync({});
+      setLocation(currentLocation);
+    })();
+  }, []);
 
   return (
     <View style={styles.container}>
-      <Button title="Start Location Tracking" onPress={startTracking} />
+      <Text style={styles.title}>📍 Task Manager + Location</Text>
 
-      <View style={{ height: 20 }} />
+      {errorMsg ? (
+        <Text style={styles.error}>{errorMsg}</Text>
+      ) : null}
 
-      <Button title="Update Location Display" onPress={refreshLocation} />
-
-      {location && (
-        <View style={styles.infoBox}>
-          <Text>Latitude: {location.latitude}</Text>
-          <Text>Longitude: {location.longitude}</Text>
+      {location ? (
+        <View style={styles.card}>
+          <Text style={styles.label}>Latitude:</Text>
+          <Text style={styles.value}>{location.coords.latitude.toFixed(6)}</Text>
+          <Text style={styles.label}>Longitude:</Text>
+          <Text style={styles.value}>{location.coords.longitude.toFixed(6)}</Text>
         </View>
+      ) : (
+        <Text style={styles.loading}>Fetching location...</Text>
       )}
+
+      <View style={styles.buttonContainer}>
+        <Button
+          onPress={requestPermissions}
+          title={isTracking ? 'Background tracking enabled ✅' : 'Enable background location'}
+          disabled={isTracking}
+        />
+      </View>
+
+      <Text style={styles.note}>
+        Note: Background location tracking requires a physical device.
+        The task manager will continue to receive location updates even when the app is in the background.
+      </Text>
     </View>
   );
 }
@@ -93,10 +93,61 @@ export default function Index() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+    backgroundColor: '#f5f5f5',
   },
-  infoBox: {
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 30,
+    color: '#333',
+  },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 20,
+    width: '100%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  label: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 8,
+  },
+  value: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  loading: {
+    fontSize: 16,
+    color: '#999',
+    marginBottom: 20,
+  },
+  error: {
+    fontSize: 14,
+    color: '#e74c3c',
+    marginBottom: 15,
+    textAlign: 'center',
+  },
+  buttonContainer: {
+    marginVertical: 10,
+    width: '100%',
+  },
+  note: {
     marginTop: 20,
+    fontSize: 13,
+    color: '#999',
+    textAlign: 'center',
+    fontStyle: 'italic',
+    paddingHorizontal: 20,
   },
 });
